@@ -43,6 +43,12 @@
             70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
             100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
         }
+
+        .search-input:focus {
+            outline: none;
+            border-color: #4f46e5;
+            box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.1);
+        }
     </style>
 </head>
 <body class="p-4 md:p-8">
@@ -119,13 +125,26 @@
             </div>
         </div>
 
-        <!-- Detail Table -->
+        <!-- Detail Table with Search -->
         <div class="bg-white rounded-[2.5rem] shadow-xl overflow-hidden border border-gray-100 mb-8">
-            <div class="p-6 border-b border-gray-50 flex justify-between items-center bg-gray-50/50">
-                <h4 class="font-black text-gray-700 uppercase tracking-widest text-xs">Precinct Breakdown</h4>
+            <div class="p-6 border-b border-gray-50 flex flex-col md:flex-row justify-between items-center gap-4 bg-gray-50/50">
+                <h4 class="font-black text-gray-700 uppercase tracking-widest text-xs">Center Breakdown </h4>
+                <div class="relative w-full md:w-64">
+                    <input 
+                        type="text" 
+                        id="table-search" 
+                        placeholder="Search center name or ID..." 
+                        class="search-input w-full px-4 py-2 bg-white border border-gray-200 rounded-xl text-sm font-bold placeholder-gray-300 transition-all"
+                    >
+                    <div class="absolute right-3 top-2.5 text-gray-300">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                    </div>
+                </div>
             </div>
             <div class="overflow-x-auto custom-scrollbar max-h-[500px]">
-                <table class="w-full text-left">
+                <table class="w-full text-left" id="main-data-table">
                     <thead class="sticky top-0 bg-white z-10 border-b-2 border-gray-100">
                         <tr id="table-head"></tr>
                     </thead>
@@ -146,11 +165,11 @@
     <script>
         const SHEET_ID = "18hWKNfT9614J4w5xFnpiOpgpRAIKPypbM_6kVRxeY5w";
         const REFRESH_INTERVAL = 20000;
+        let cachedTableData = null; // Store data for filtering
 
         async function updateDashboard() {
             const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json`;
             
-            // Animation for progress bar
             const bar = document.getElementById('progress-bar');
             bar.style.transition = 'none';
             bar.style.width = '0%';
@@ -170,7 +189,7 @@
 
                 // Mapping cells per requirements
                 document.getElementById('leading-name').innerText = val(2, 10); // K3
-                document.getElementById('margin-val').innerText = fmt(4, 8);    // I5 (Assuming index 8)
+                document.getElementById('margin-val').innerText = fmt(4, 8);    // I5
                 
                 document.getElementById('c1-name').innerText = val(2, 6);       // G3
                 document.getElementById('c2-name').innerText = val(3, 6);       // G4
@@ -181,10 +200,11 @@
 
                 // Global Stats
                 document.getElementById('total-centers').innerText = val(6, 8);  // I7
-                document.getElementById('results-given').innerText = val(43, 8); // I44
+                document.getElementById('results-given').innerText = val(8, 8);  // I9 (Updated mapping)
                 document.getElementById('remaining').innerText = val(63, 0);     // A64
 
-                renderTable(json.table);
+                cachedTableData = json.table;
+                renderTable(cachedTableData);
 
                 document.getElementById('update-timer').innerText = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             } catch (err) {
@@ -193,41 +213,61 @@
             }
         }
 
-        function renderTable(table) {
+        function renderTable(table, filterTerm = '') {
             const head = document.getElementById('table-head');
             const body = document.getElementById('table-body');
             
-            // Render Headers (A to E)
-            let headHtml = '';
-            table.cols.slice(0, 5).forEach(col => {
-                headHtml += `<th class="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">${col.label || ''}</th>`;
-            });
-            head.innerHTML = headHtml;
+            if (head.innerHTML === '') {
+                let headHtml = '';
+                table.cols.slice(0, 5).forEach(col => {
+                    headHtml += `<th class="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">${col.label || ''}</th>`;
+                });
+                head.innerHTML = headHtml;
+            }
 
-            // Render Rows (up to 109)
             let bodyHtml = '';
             const rowLimit = Math.min(109, table.rows.length);
+            const lowerFilter = filterTerm.toLowerCase();
+
             for (let i = 0; i < rowLimit; i++) {
-                bodyHtml += `<tr class="border-b border-gray-50 hover:bg-gray-50/50 transition">`;
+                let rowMatches = false;
+                let rowCellsHtml = '';
+                
+                for (let j = 0; j < 5; j++) {
+                    let cellData = table.rows[i]?.c[j];
+                    let displayVal = cellData?.f || String(cellData?.v || '');
+                    
+                    if (displayVal.toLowerCase().includes(lowerFilter)) {
+                        rowMatches = true;
+                    }
+                }
+
+                if (filterTerm && !rowMatches) continue;
+
                 for (let j = 0; j < 5; j++) {
                     let cellData = table.rows[i]?.c[j];
                     let displayVal = cellData?.f || cellData?.v || '';
 
-                    // Verified Column Logic (Assuming index 4 is the Verified column)
                     if (j === 4) {
-                        if (displayVal === true || displayVal === 'TRUE' || displayVal === 'Verified') {
-                            displayVal = '<span class="text-green-500 text-xl">✓</span>';
-                        } else if (displayVal === false || displayVal === 'FALSE' || displayVal === 'Unverified') {
-                            displayVal = '<span class="text-red-500 text-xl">✕</span>';
+                        if (displayVal === true || displayVal === 'TRUE' || String(displayVal).toLowerCase() === 'verified') {
+                            displayVal = '<span class="text-green-500 text-xl" title="Verified">✓</span>';
+                        } else if (displayVal === false || displayVal === 'FALSE' || String(displayVal).toLowerCase() === 'unverified') {
+                            displayVal = '<span class="text-red-500 text-xl" title="Unverified">✕</span>';
                         }
                     }
-
-                    bodyHtml += `<td class="px-6 py-4 whitespace-nowrap">${displayVal}</td>`;
+                    rowCellsHtml += `<td class="px-6 py-4 whitespace-nowrap">${displayVal}</td>`;
                 }
-                bodyHtml += `</tr>`;
+
+                bodyHtml += `<tr class="border-b border-gray-50 hover:bg-gray-50/50 transition">${rowCellsHtml}</tr>`;
             }
             body.innerHTML = bodyHtml;
         }
+
+        document.getElementById('table-search').addEventListener('input', (e) => {
+            if (cachedTableData) {
+                renderTable(cachedTableData, e.target.value);
+            }
+        });
 
         window.onload = () => {
             updateDashboard();
